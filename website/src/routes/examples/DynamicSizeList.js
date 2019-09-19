@@ -25,7 +25,7 @@ var colors = [
   ['#FFD600', '#FFF59D'],
 ];
 
-const items = new Array(500).fill(true).map(() => {
+const allItems = new Array(5000).fill(true).map(() => {
   const text = loremIpsum({ units: 'paragraphs' });
   return {
     colors: colors[Math.floor(Math.random() * colors.length)],
@@ -43,14 +43,14 @@ class Row extends PureComponent {
     const { index } = this.props;
     // We mutate in place here rather than using setState,
     // Because it persists the data after unmount an remount.
-    const item = items[index];
+    const item = allItems[index];
     item.isRowExpanded = !item.isRowExpanded;
     this.forceUpdate();
   };
 
   render() {
     const { index, forwardedRef, style } = this.props;
-    const item = items[index];
+    const item = allItems[index];
 
     return (
       <div
@@ -87,14 +87,14 @@ class Column extends PureComponent {
     const { index } = this.props;
     // We mutate in place here rather than using setState,
     // Because it persists the data after unmount an remount.
-    const item = items[index];
+    const item = allItems[index];
     item.isColumnExpanded = !item.isColumnExpanded;
     this.forceUpdate();
   };
 
   render() {
     const { data: showText, forwardedRef, index, style } = this.props;
-    const item = items[index];
+    const item = allItems[index];
 
     return (
       <div
@@ -127,9 +127,12 @@ class Column extends PureComponent {
 }
 
 export default class DynamicSizeList extends PureComponent {
+  listRef = React.createRef();
+
   state = {
     halfSize: false,
     showText: true,
+    items: [],
   };
 
   handleToggleResize = () =>
@@ -142,8 +145,24 @@ export default class DynamicSizeList extends PureComponent {
       showText: !prevState.showText,
     }));
 
+  scrollToRow2000Auto = () => {
+    this.listRef.current.scrollToItem(2000);
+  };
+  scrollToRow2500Smart = () => {
+    this.listRef.current.scrollToItem(2500, 'smart');
+  };
+  scrollToRow3000Center = () => {
+    this.listRef.current.scrollToItem(3000, 'center');
+  };
+
+  toggleItems = () => {
+    this.setState({
+      items: this.state.items.length == allItems.length ? allItems.filter( (_,i) => i < 50 ) : allItems
+    });
+  }
+
   render() {
-    const { halfSize, showText } = this.state;
+    const { halfSize, showText, items } = this.state;
 
     return (
       <div className={styles.ExampleWrapper}>
@@ -168,13 +187,28 @@ export default class DynamicSizeList extends PureComponent {
             className={styles.ExampleDemo}
             sandbox="dynamic-size-list-vertical"
           >
+            <button onClick={()=> this.toggleItems()}>
+              Change items
+            </button>
+
             <button
               className={styles.ExampleButton}
               onClick={this.handleToggleResize}
             >
               Resize list
             </button>
+            <button className={styles.ExampleButton} onClick={this.scrollToRow2000Auto}>
+              Scroll to row 2000 (align: auto)
+            </button>
+            <button className={styles.ExampleButton} onClick={this.scrollToRow2500Smart}>
+              Scroll to row 2500 (align: smart)
+            </button>
+            <button className={styles.ExampleButton} onClick={this.scrollToRow3000Center}>
+              Scroll to row 3000 (align: center)
+            </button>
             <List
+              key={`itm-${items.length}`}
+              ref={this.listRef}
               className={styles.List}
               height={200}
               itemCount={items.length}
@@ -183,35 +217,7 @@ export default class DynamicSizeList extends PureComponent {
               {RefForwardedRow}
             </List>
           </ProfiledExample>
-          <div className={styles.ExampleCode}>
-            <CodeBlock value={CODE_VERTICAL} />
-          </div>
-        </div>
-        <div className={styles.Example}>
-          <ProfiledExample
-            className={styles.ExampleDemo}
-            sandbox="dynamic-size-list-horizontal"
-          >
-            <button
-              className={styles.ExampleButton}
-              onClick={this.handleToggleText}
-            >
-              Toggle text
-            </button>
-            <List
-              className={styles.List}
-              layout="horizontal"
-              height={50}
-              itemCount={items.length}
-              itemData={showText}
-              width={300}
-            >
-              {RefForwardedColumn}
-            </List>
-          </ProfiledExample>
-          <div className={styles.ExampleCode}>
-            <CodeBlock value={CODE_HORIZONTAL} />
-          </div>
+
         </div>
       </div>
     );

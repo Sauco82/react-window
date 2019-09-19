@@ -29,7 +29,7 @@ type InstanceProps = {|
   instance: any,
   itemOffsetMap: { [index: number]: number },
   itemSizeMap: { [index: number]: number },
-  lastMeasuredIndex: number,
+  itemIsMeasured: { [index: number]: boolean },
   lastPositionedIndex: number,
   totalMeasuredSize: number,
 |};
@@ -44,16 +44,16 @@ const getItemMetadata = (
     instance,
     itemOffsetMap,
     itemSizeMap,
-    lastMeasuredIndex,
+    itemIsMeasured,
     lastPositionedIndex,
   } = instanceProps;
 
   // If the specified item has not yet been measured,
   // Just return an estimated size for now.
-  if (index > lastMeasuredIndex) {
+  if (!itemIsMeasured[index]) {
     return {
-      offset: 0,
-      size: estimatedItemSize,
+      offset: itemOffsetMap[index],
+      size: itemSizeMap[index],
     };
   }
 
@@ -104,6 +104,8 @@ const findNearestItemBinarySearch = (
       low = middle + 1;
     } else if (currentOffset > offset) {
       high = middle - 1;
+    } else {
+      return 0;
     }
   }
 
@@ -119,11 +121,59 @@ const getEstimatedTotalSize = (
   {
     itemSizeMap,
     estimatedItemSize,
-    lastMeasuredIndex,
     totalMeasuredSize,
+    itemIsMeasured,
   }: InstanceProps
 ) =>
-  totalMeasuredSize + (itemCount - lastMeasuredIndex - 1) * estimatedItemSize;
+  totalMeasuredSize +
+  (itemCount - Object.keys(itemIsMeasured).length) * estimatedItemSize;
+
+const getOffsetForIndexAndAlignment = (
+  props: Props<any>,
+  index: number,
+  align: ScrollToAlign,
+  scrollOffset: number,
+  instanceProps: InstanceProps
+): number => {
+  const { direction, layout, height, width, style } = props;
+
+  const size = (((direction === 'horizontal' || layout === 'horizontal'
+    ? width
+    : height): any): number);
+  const itemMetadata = getItemMetadata(props, index, instanceProps);
+
+  // Get estimated total size after ItemMetadata is computed,
+  // To ensure it reflects actual measurements instead of just estimates.
+  const estimatedTotalSize = getEstimatedTotalSize(props, instanceProps);
+
+  const maxOffset = Math.min(estimatedTotalSize - size, itemMetadata.offset);
+
+  // If the size of the item to render is bigger than the size of the list
+  // minOffset result could be bigger than maxOffset,
+  // this guarantees proper functioning
+  const minOffset = Math.min(
+    maxOffset,
+    Math.max(0, itemMetadata.offset - size + itemMetadata.size)
+  );
+
+  switch (align) {
+    case 'start':
+      return maxOffset;
+    case 'end':
+      return minOffset;
+    case 'center':
+      return Math.round(minOffset + (maxOffset - minOffset) / 2);
+    case 'auto':
+    default:
+      if (scrollOffset >= minOffset && scrollOffset <= maxOffset) {
+        return scrollOffset;
+      } else if (scrollOffset - minOffset < maxOffset - scrollOffset) {
+        return minOffset;
+      } else {
+        return maxOffset;
+      }
+  }
+};
 
 const DynamicSizeList = createListComponent({
   getItemOffset: (
@@ -145,80 +195,22 @@ const DynamicSizeList = createListComponent({
 
   getEstimatedTotalSize,
 
-  getOffsetForIndexAndAlignment: (
-    props: Props<any>,
-    index: number,
-    align: ScrollToAlign,
-    scrollOffset: number,
-    instanceProps: InstanceProps
-  ): number => {
-    const { direction, layout, height, width } = props;
-
-    if (process.env.NODE_ENV !== 'production') {
-      const { lastMeasuredIndex } = instanceProps;
-      if (index > lastMeasuredIndex) {
-        console.warn(
-          `DynamicSizeList does not support scrolling to items that yave not yet measured. ` +
-            `scrollToItem() was called with index ${index} but the last measured item was ${lastMeasuredIndex}.`
-        );
-      }
-    }
-
-    const size = (((direction === 'horizontal' || layout === 'horizontal'
-      ? width
-      : height): any): number);
-    const itemMetadata = getItemMetadata(props, index, instanceProps);
-
-    // Get estimated total size after ItemMetadata is computed,
-    // To ensure it reflects actual measurements instead of just estimates.
-    const estimatedTotalSize = getEstimatedTotalSize(props, instanceProps);
-
-    const maxOffset = Math.min(estimatedTotalSize - size, itemMetadata.offset);
-    const minOffset = Math.max(
-      0,
-      itemMetadata.offset - size + itemMetadata.size
-    );
-
-    switch (align) {
-      case 'start':
-        return maxOffset;
-      case 'end':
-        return minOffset;
-      case 'center':
-        return Math.round(minOffset + (maxOffset - minOffset) / 2);
-      case 'auto':
-      default:
-        if (scrollOffset >= minOffset && scrollOffset <= maxOffset) {
-          return scrollOffset;
-        } else if (scrollOffset - minOffset < maxOffset - scrollOffset) {
-          return minOffset;
-        } else {
-          return maxOffset;
-        }
-    }
-  },
+  getOffsetForIndexAndAlignment,
 
   getStartIndexForOffset: (
     props: Props<any>,
     offset: number,
     instanceProps: InstanceProps
   ): number => {
-    const { lastMeasuredIndex, totalMeasuredSize } = instanceProps;
+    const { itemCount } = props;
 
-    // If we've already positioned and measured past this point,
-    // Use a binary search to find the closets cell.
-    if (offset <= totalMeasuredSize) {
-      return findNearestItemBinarySearch(
-        props,
-        instanceProps,
-        lastMeasuredIndex,
-        0,
-        offset
-      );
-    }
-
-    // Otherwise render a new batch of items starting from where we left off.
-    return lastMeasuredIndex + 1;
+    return findNearestItemBinarySearch(
+      props,
+      instanceProps,
+      itemCount - 1,
+      0,
+      offset
+    );
   },
 
   getStopIndexForStartIndex: (
@@ -247,14 +239,25 @@ const DynamicSizeList = createListComponent({
   },
 
   initInstanceProps(props: Props<any>, instance: any): InstanceProps {
-    const { estimatedItemSize } = ((props: any): DynanmicProps);
+    let { estimatedItemSize, itemCount } = ((props: any): DynanmicProps);
+    let itemOffsetMap = {};
+    let itemSizeMap = {};
+
+    estimatedItemSize = estimatedItemSize || DEFAULT_ESTIMATED_ITEM_SIZE;
+
+    for (let i = 0; i < itemCount; i++) {
+      let offset = i === 0 ? 0 : itemOffsetMap[i - 1] + estimatedItemSize;
+
+      itemOffsetMap[i] = offset;
+      itemSizeMap[i] = estimatedItemSize;
+    }
 
     const instanceProps = {
-      estimatedItemSize: estimatedItemSize || DEFAULT_ESTIMATED_ITEM_SIZE,
+      estimatedItemSize,
       instance,
-      itemOffsetMap: {},
-      itemSizeMap: {},
-      lastMeasuredIndex: -1,
+      itemOffsetMap,
+      itemSizeMap,
+      itemIsMeasured: {},
       lastPositionedIndex: -1,
       totalMeasuredSize: 0,
     };
@@ -362,9 +365,6 @@ const DynamicSizeList = createListComponent({
       }
     };
 
-    // This function may be called out of order!
-    // It is not safe to reposition items here.
-    // Be careful when comparing index and lastMeasuredIndex.
     const handleNewMeasurements: HandleNewMeasurements = (
       index: number,
       newSize: number,
@@ -372,8 +372,8 @@ const DynamicSizeList = createListComponent({
     ) => {
       const {
         itemSizeMap,
-        lastMeasuredIndex,
         lastPositionedIndex,
+        itemIsMeasured,
       } = instanceProps;
 
       // In some browsers (e.g. Firefox) fast scrolling may skip rows.
@@ -387,7 +387,7 @@ const DynamicSizeList = createListComponent({
         instanceProps.lastPositionedIndex = index;
       }
 
-      if (index <= lastMeasuredIndex) {
+      if (itemIsMeasured[index]) {
         if (oldSize === newSize) {
           return;
         }
@@ -404,7 +404,7 @@ const DynamicSizeList = createListComponent({
           sizeDeltaTotal += newSize - oldSize;
         }
       } else {
-        instanceProps.lastMeasuredIndex = index;
+        instanceProps.itemIsMeasured[index] = true;
         instanceProps.totalMeasuredSize += newSize;
       }
 
@@ -422,6 +422,54 @@ const DynamicSizeList = createListComponent({
       }
     };
     instance._handleNewMeasurements = handleNewMeasurements;
+
+    instance.scrollTo = (scrollOffset: number, callback: any) => {
+      scrollOffset = Math.max(0, scrollOffset);
+
+      instance.setState(
+        prevState => {
+          if (prevState.scrollOffset === scrollOffset) {
+            return null;
+          }
+          return {
+            scrollDirection:
+              prevState.scrollOffset < scrollOffset ? 'forward' : 'backward',
+            scrollOffset: scrollOffset,
+            scrollUpdateWasRequested: true,
+          };
+        },
+        () => {
+          instance._resetIsScrollingDebounced();
+          if (callback) callback(instance.state.scrollOffset);
+        }
+      );
+    };
+
+    // Scrolling to an unmeasured area will create an offset at rendering due to
+    // the new measurements, which can be solved by scrolling and measuring recursively.
+    // Accurate estimated item sizes will reduce the number of iterations.
+    instance.scrollToItem = (index: number, align: ScrollToAlign = 'auto') => {
+      function adjustScrollWithNewMeasuments(newScroll) {
+        const { itemCount } = instance.props;
+        const { scrollOffset } = instance.state;
+
+        index = Math.max(0, Math.min(index, itemCount - 1));
+
+        const offsetForIndex = getOffsetForIndexAndAlignment(
+          instance.props,
+          index,
+          align,
+          scrollOffset,
+          instance._instanceProps
+        );
+
+        if (offsetForIndex !== newScroll) {
+          instance.scrollTo(offsetForIndex, adjustScrollWithNewMeasuments);
+        }
+      }
+
+      adjustScrollWithNewMeasuments(-1);
+    };
 
     // Override the item-rendering process to wrap items with ItemMeasurer.
     // This keep the external API simpler.

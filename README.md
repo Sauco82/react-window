@@ -8,10 +8,10 @@
 
 ```bash
 # Yarn
-yarn add react-window
+yarn add react-window-random-access
 
 # NPM
-npm install --save react-window
+npm install --save react-window-random-access
 ```
 
 ## Usage
