@@ -146,7 +146,11 @@ const getOffsetForIndexAndAlignment = (
   // To ensure it reflects actual measurements instead of just estimates.
   const estimatedTotalSize = getEstimatedTotalSize(props, instanceProps);
 
-  const maxOffset = Math.min(estimatedTotalSize - size, itemMetadata.offset);
+  // On certain situations estimatedTotalSize - size can be smaller than 0
+  const maxOffset = Math.min(
+    Math.max(0, estimatedTotalSize - size),
+    itemMetadata.offset
+  );
 
   // If the size of the item to render is bigger than the size of the list
   // minOffset result could be bigger than maxOffset,
